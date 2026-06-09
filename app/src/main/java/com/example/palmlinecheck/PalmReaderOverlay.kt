@@ -3,22 +3,29 @@ package com.example.palmlinecheck
 import android.graphics.Bitmap
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -49,6 +56,19 @@ fun PalmReaderOverlay(
     var predictions by remember { mutableStateOf<List<RoboflowPalmLineApi.LinePrediction>?>(null) }
     var statusText  by remember { mutableStateOf("Detecting palm lines… (first run may take ~30s)") }
 
+    // Zoom & pan state
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+
+    val transformableState = rememberTransformableState { zoomChange, panChange, _ ->
+        scale = (scale * zoomChange).coerceIn(1f, 5f)  // Min 1x, Max 5x zoom
+        offset = if (scale == 1f) {
+            Offset.Zero  // Reset pan when fully zoomed out
+        } else {
+            offset + panChange
+        }
+    }
+
     LaunchedEffect(capturedBitmap, roboflowApiKey) {
         statusText  = "Detecting palm lines…"
         predictions = null
@@ -68,23 +88,58 @@ fun PalmReaderOverlay(
     }
 
     Box(modifier = modifier) {
-        Image(
-            bitmap = capturedBitmap.asImageBitmap(),
-            contentDescription = "Captured Palm",
-            modifier = Modifier.matchParentSize(),
-            contentScale = ContentScale.FillBounds
-        )
+        // Zoomable & pannable container for image + lines
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onDoubleTap = {
+                            // Reset zoom and pan on double-tap
+                            scale = 1f
+                            offset = Offset.Zero
+                        }
+                    )
+                }
+                .transformable(state = transformableState)
+                .graphicsLayer(
+                    scaleX = scale,
+                    scaleY = scale,
+                    translationX = offset.x,
+                    translationY = offset.y
+                )
+        ) {
+            Image(
+                bitmap = capturedBitmap.asImageBitmap(),
+                contentDescription = "Captured Palm",
+                modifier = Modifier.matchParentSize(),
+                contentScale = ContentScale.FillBounds
+            )
 
-        Canvas(modifier = Modifier.matchParentSize()) {
-            val cW     = size.width
-            val cH     = size.height
-            val stroke = Stroke(width = 5f, cap = StrokeCap.Round)
+            Canvas(modifier = Modifier.matchParentSize()) {
+                val cW     = size.width
+                val cH     = size.height
+                val stroke = Stroke(width = 5f, cap = StrokeCap.Round)
 
-            predictions?.forEach { pred ->
-                val color = CLASS_COLORS[pred.className] ?: FALLBACK_COLOR
-                if (pred.points.size < 2) return@forEach
-                drawPath(keypointPath(pred.points, cW, cH), color, style = stroke)
+                predictions?.forEach { pred ->
+                    val color = CLASS_COLORS[pred.className] ?: FALLBACK_COLOR
+                    if (pred.points.size < 2) return@forEach
+                    drawPath(keypointPath(pred.points, cW, cH), color, style = stroke)
+                }
             }
+        }
+
+        // Zoom indicator
+        if (scale > 1f) {
+            Text(
+                text = "%.1fx".format(scale),
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(16.dp),
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold
+            )
         }
 
         Text(
