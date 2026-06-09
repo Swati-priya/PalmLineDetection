@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "Bash(find /Users/swatipriya/Desktop -maxdepth 2 -type d | grep -i palm | head -20)",
+      "Read(//Users/swatipriya/Desktop/**)",
+      "Bash(./gradlew clean *)",
+      "Bash(./gradlew assembleDebug)",
+      "Bash(./gradlew assembleDebug --info)",
+      "Bash(./gradlew compileDebugKotlin)",
+      "Bash(grep -v \"^$\\\\|UP-TO-DATE\\\\|actionable\\\\|configuration\\\\|Consider\")",
+      "WebSearch"
+    ]
+  }
+}
