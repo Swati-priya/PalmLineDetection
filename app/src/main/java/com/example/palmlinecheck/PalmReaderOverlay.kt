@@ -27,6 +27,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -59,13 +61,28 @@ fun PalmReaderOverlay(
     // Zoom & pan state
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
+    var containerSize by remember { mutableStateOf(IntSize.Zero) }
 
     val transformableState = rememberTransformableState { zoomChange, panChange, _ ->
-        scale = (scale * zoomChange).coerceIn(1f, 5f)  // Min 1x, Max 5x zoom
-        offset = if (scale == 1f) {
-            Offset.Zero  // Reset pan when fully zoomed out
+        val newScale = (scale * zoomChange).coerceIn(1f, 5f)  // Min 1x, Max 5x zoom
+
+        if (newScale == 1f) {
+            // Reset pan when fully zoomed out
+            scale = 1f
+            offset = Offset.Zero
         } else {
-            offset + panChange
+            scale = newScale
+
+            // Calculate max pan bounds to keep image inside frame
+            val maxX = (containerSize.width * (newScale - 1f)) / 2f
+            val maxY = (containerSize.height * (newScale - 1f)) / 2f
+
+            // Apply pan with bounds (also clamps when zooming out)
+            val newOffset = offset + panChange
+            offset = Offset(
+                x = newOffset.x.coerceIn(-maxX, maxX),
+                y = newOffset.y.coerceIn(-maxY, maxY)
+            )
         }
     }
 
@@ -92,6 +109,7 @@ fun PalmReaderOverlay(
         Box(
             modifier = Modifier
                 .matchParentSize()
+                .onSizeChanged { containerSize = it }
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onDoubleTap = {
