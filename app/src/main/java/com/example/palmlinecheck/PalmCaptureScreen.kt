@@ -75,8 +75,19 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult
 import java.util.concurrent.Executors
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.asImageBitmap
 
 @Composable
 fun PalmCaptureScreen(
@@ -91,6 +102,7 @@ fun PalmCaptureScreen(
     var capturedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var handLandmarkerResult by remember { mutableStateOf<HandLandmarkerResult?>(null) }
     var isProcessing by remember { mutableStateOf(false) }
+    var showProcessing by remember { mutableStateOf(false) }
     var validationResult by remember { mutableStateOf(PalmValidationResult()) }
 
     val handLandmarkerHelper = remember { HandLandmarkerHelper(context) }
@@ -101,13 +113,16 @@ fun PalmCaptureScreen(
         onDispose { handLandmarkerHelper.close() }
     }
 
-    if (capturedBitmap != null) {
+    if (capturedBitmap != null && showProcessing) {
+        ProcessingScreen(capturedBitmap = capturedBitmap!!)
+    } else if (capturedBitmap != null) {
         ResultScreen(
             capturedBitmap = capturedBitmap!!,
             palmLabel = palmLabel,
             onRetake = {
                 capturedBitmap = null
                 handLandmarkerResult = null
+                showProcessing = false
                 palmValidator.reset()
             },
             onContinue = onContinue
@@ -125,20 +140,20 @@ fun PalmCaptureScreen(
             onBackPressed = onBackPressed,
             onValidationUpdate = { validationResult = it },
             onImageCaptured = { bitmap ->
-                // Run detection on a background thread; state updates back on Main
                 scope.launch {
-                    withContext(Dispatchers.Main) { isProcessing = true }
+                    isProcessing = true
                     val result = withContext(Dispatchers.Default) {
                         handLandmarkerHelper.detectHand(bitmap)
                     }
-                    withContext(Dispatchers.Main) {
-                        isProcessing = false
-                        if (result?.landmarks().isNullOrEmpty()) {
-                            Toast.makeText(context, "No hand detected. Please try again.", Toast.LENGTH_SHORT).show()
-                        } else {
-                            handLandmarkerResult = result
-                            capturedBitmap = bitmap  // navigate to ResultScreen only on success
-                        }
+                    isProcessing = false
+                    if (result?.landmarks().isNullOrEmpty()) {
+                        Toast.makeText(context, "No hand detected. Please try again.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        handLandmarkerResult = result
+                        capturedBitmap = bitmap
+                        showProcessing = true
+                        delay(10_000)
+                        showProcessing = false
                     }
                 }
             },
@@ -464,6 +479,99 @@ private fun CameraScreen(
             // Gap: capture button → navigation bar
             Spacer(Modifier.height(22.dp))
         }
+    }
+}
+
+// ─── Processing / analysis screen ────────────────────────────────────────────
+
+@Composable
+private fun ProcessingScreen(capturedBitmap: Bitmap) {
+    val infiniteTransition = rememberInfiniteTransition(label = "shimmer")
+    val shimmerProgress by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "shimmerProgress"
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
+        // Captured image background
+        Image(
+            bitmap = capturedBitmap.asImageBitmap(),
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop
+        )
+
+        // Dim overlay
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.50f))
+        )
+
+        // Diagonal shimmer sweep
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val w = constraints.maxWidth.toFloat()
+            val h = constraints.maxHeight.toFloat()
+            val bandWidth = w * 0.55f
+            val startX = shimmerProgress * (w + bandWidth) - bandWidth
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color.White.copy(alpha = 0.06f),
+                                Color.White.copy(alpha = 0.20f),
+                                Color.White.copy(alpha = 0.06f),
+                                Color.Transparent
+                            ),
+                            start = Offset(startX, 0f),
+                            end = Offset(startX + bandWidth, h)
+                        )
+                    )
+            )
+        }
+
+        // Horizontal scan line sweeping downward
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val totalHeight = maxHeight
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(32.dp)
+                    .offset(y = totalHeight * shimmerProgress)
+                    .background(
+                        Brush.horizontalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color(0xFFAB82FF),
+                                Color(0xFFAB82FF),
+                                Color(0xFF7C4DFF).copy(alpha = 0.8f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+            )
+        }
+
+        // Central progress indicator + label
+        Text(
+            text = "Analysing Palm\u2026",
+            color = Color.White,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.align(Alignment.Center)
+        )
     }
 }
 
